@@ -15,7 +15,7 @@ class ArrayChannelManager implements ChannelManager
     /** @var string */
     protected $appId;
 
-    /** @var array */
+    /** @var Channel[][] */
     protected $channels = [];
 
     public function findOrCreate(string $appId, string $channelName): Channel
@@ -55,7 +55,7 @@ class ArrayChannelManager implements ChannelManager
     public function getConnectionCount(string $appId): int
     {
         return collect($this->getChannels($appId))
-            ->sum(function ($channel) {
+            ->sum(function (Channel $channel) {
                 return count($channel->getSubscribedConnections());
             });
     }
