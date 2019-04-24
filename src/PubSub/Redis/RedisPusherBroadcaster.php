@@ -7,13 +7,10 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Contracts\Redis\Factory as Redis;
 use Illuminate\Broadcasting\Broadcasters\Broadcaster;
-use Illuminate\Broadcasting\Broadcasters\UsePusherChannelConventions;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class RedisPusherBroadcaster extends Broadcaster
 {
-    use UsePusherChannelConventions;
-
     /**
      * The Pusher SDK instance.
      *
@@ -58,6 +55,33 @@ class RedisPusherBroadcaster extends Broadcaster
         $this->connection = $connection;
     }
 
+
+    /**
+     * Return true if channel is protected by authentication.
+     *
+     * @param  string  $channel
+     * @return bool
+     */
+    public function isGuardedChannel($channel)
+    {
+        return Str::startsWith($channel, ['private-', 'presence-']);
+    }
+    /**
+     * Remove prefix from channel name.
+     *
+     * @param  string  $channel
+     * @return string
+     */
+    public function normalizeChannelName($channel)
+    {
+        if ($this->isGuardedChannel($channel)) {
+            return Str::startsWith($channel, 'private-')
+                ? Str::replaceFirst('private-', '', $channel)
+                : Str::replaceFirst('presence-', '', $channel);
+        }
+        return $channel;
+    }
+
     /**
      * Authenticate the incoming request for a given channel.
      *
@@ -71,7 +95,7 @@ class RedisPusherBroadcaster extends Broadcaster
         $channelName = $this->normalizeChannelName($request->channel_name);
 
         if ($this->isGuardedChannel($request->channel_name) &&
-            ! $this->retrieveUser($request, $channelName)) {
+            ! $request->user()) {
             throw new AccessDeniedHttpException;
         }
 
@@ -102,7 +126,7 @@ class RedisPusherBroadcaster extends Broadcaster
             $request,
             $this->pusher->presence_auth(
                 $request->channel_name, $request->socket_id,
-                $this->retrieveUser($request, $channelName)->getAuthIdentifier(), $result
+                $request->user(), $result
             )
         );
     }
