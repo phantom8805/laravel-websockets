@@ -2,6 +2,7 @@
 
 namespace BeyondCode\LaravelWebSockets\Console;
 
+use React\Dns\Resolver\ResolverInterface;
 use React\Socket\Connector;
 use Clue\React\Buzz\Browser;
 use Illuminate\Console\Command;
@@ -12,7 +13,9 @@ use React\Dns\Resolver\Resolver as ReactDnsResolver;
 use BeyondCode\LaravelWebSockets\Statistics\DnsResolver;
 use BeyondCode\LaravelWebSockets\Facades\StatisticsLogger;
 use BeyondCode\LaravelWebSockets\Facades\WebSocketsRouter;
+use BeyondCode\LaravelWebSockets\PubSub\Redis\RedisClient;
 use BeyondCode\LaravelWebSockets\Server\Logger\HttpLogger;
+use BeyondCode\LaravelWebSockets\PubSub\ReplicationInterface;
 use BeyondCode\LaravelWebSockets\Server\WebSocketServerFactory;
 use BeyondCode\LaravelWebSockets\Server\Logger\ConnectionLogger;
 use BeyondCode\LaravelWebSockets\Server\Logger\WebsocketsLogger;
@@ -44,6 +47,7 @@ class StartWebSocketServer extends Command
             ->configureMessageLogger()
             ->configureConnectionLogger()
             ->registerEchoRoutes()
+            ->configurePubSubReplication()
             ->startWebSocketServer();
     }
 
@@ -59,8 +63,8 @@ class StartWebSocketServer extends Command
 
         $browser = new Browser($this->loop, $connector);
 
-        app()->singleton(StatisticsLoggerInterface::class, function () use ($browser) {
-            return new HttpStatisticsLogger(app(ChannelManager::class), $browser);
+        $this->laravel->singleton(StatisticsLoggerInterface::class, function () use ($browser) {
+            return new HttpStatisticsLogger($this->laravel->make(ChannelManager::class), $browser);
         });
 
         $this->loop->addPeriodicTimer(config('websockets.statistics.interval_in_seconds'), function () {
@@ -72,7 +76,7 @@ class StartWebSocketServer extends Command
 
     protected function configureHttpLogger()
     {
-        app()->singleton(HttpLogger::class, function () {
+        $this->laravel->singleton(HttpLogger::class, function () {
             return (new HttpLogger($this->output))
                 ->enable($this->option('debug') ?: config('app.debug'))
                 ->verbose($this->output->isVerbose());
@@ -83,7 +87,7 @@ class StartWebSocketServer extends Command
 
     protected function configureMessageLogger()
     {
-        app()->singleton(WebsocketsLogger::class, function () {
+        $this->laravel->singleton(WebsocketsLogger::class, function () {
             return (new WebsocketsLogger($this->output))
                 ->enable($this->option('debug') ?: config('app.debug'))
                 ->verbose($this->output->isVerbose());
@@ -94,7 +98,7 @@ class StartWebSocketServer extends Command
 
     protected function configureConnectionLogger()
     {
-        app()->bind(ConnectionLogger::class, function () {
+        $this->laravel->bind(ConnectionLogger::class, function () {
             return (new ConnectionLogger($this->output))
                 ->enable(config('app.debug'))
                 ->verbose($this->output->isVerbose());
@@ -127,7 +131,22 @@ class StartWebSocketServer extends Command
             ->run();
     }
 
-    protected function getDnsResolver(): ReactDnsResolver
+    protected function configurePubSubReplication()
+    {
+        if (config('websockets.replication.enabled') !== true) {
+            return $this;
+        }
+
+        if (config('websockets.replication.driver') === 'redis') {
+            $this->laravel->singleton(ReplicationInterface::class, function () {
+                return (new RedisClient())->boot($this->loop);
+            });
+        }
+
+        return $this;
+    }
+
+    protected function getDnsResolver(): ResolverInterface
     {
         if (! config('websockets.statistics.perform_dns_lookup')) {
             return new DnsResolver;
